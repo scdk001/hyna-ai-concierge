@@ -19,12 +19,33 @@ type DragSession = {
   lastX: number
   lastY: number
   lastTime: number
-  stretch: number
-  angle: number
-  waveX: number
-  waveY: number
+  velocityX: number
+  velocityY: number
   moved: boolean
 }
+type LiquidMotion = {
+  stretch: number
+  stretchVelocity: number
+  stretchTarget: number
+  angle: number
+  angleTarget: number
+  lagX: number
+  lagY: number
+  lagVelocityX: number
+  lagVelocityY: number
+  lagTargetX: number
+  lagTargetY: number
+  waveX: number
+  waveY: number
+  waveVelocityX: number
+  waveVelocityY: number
+  waveTargetX: number
+  waveTargetY: number
+  wobble: number
+  wobbleVelocity: number
+}
+
+const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value))
 
 function loadPlacement(): OrbPlacement {
   try {
@@ -44,42 +65,123 @@ function clampPlacement(x: number, y: number, width: number, height: number) {
   }
 }
 
+function springStep(value: number, velocity: number, target: number, stiffness: number, damping: number, seconds: number) {
+  const acceleration = (target - value) * stiffness - velocity * damping
+  const nextVelocity = velocity + acceleration * seconds
+  return [value + nextVelocity * seconds, nextVelocity] as const
+}
+
+function shortestAngle(from: number, to: number) {
+  return ((to - from + 540) % 360) - 180
+}
+
+function writeLiquidFrame(surface: HTMLSpanElement | null, motion: LiquidMotion, now: number, idleMotion: boolean) {
+  if (!surface) return
+  const idleOne = idleMotion ? Math.sin(now / 820) : 0
+  const idleTwo = idleMotion ? Math.sin(now / 1260 + 1.8) : 0
+  const stretch = clamp(motion.stretch, -.18, .29)
+  const wobble = clamp(motion.wobble, -1.25, 1.25)
+  const lagX = clamp(motion.lagX, -18, 18)
+  const lagY = clamp(motion.lagY, -18, 18)
+  const waveX = clamp(motion.waveX + idleTwo * 2.1, -21, 21)
+  const waveY = clamp(motion.waveY + idleOne * 1.8, -21, 21)
+  const shapeA = clamp(wobble * 7.5 + waveY * .18 + idleOne * 2.1, -11, 11)
+  const shapeB = clamp(-wobble * 5.8 - waveX * .16 + idleTwo * 1.8, -10, 10)
+  const shapeC = clamp(wobble * 4.2 - waveY * .14 - idleOne * 1.7, -9, 9)
+  const shapeD = clamp(-wobble * 6.7 + waveX * .17 - idleTwo * 2.2, -11, 11)
+
+  surface.style.setProperty('--liquid-scale-x', `${1 + stretch}`)
+  surface.style.setProperty('--liquid-scale-y', `${1 - stretch * .62 + Math.abs(wobble) * .008}`)
+  surface.style.setProperty('--liquid-angle', `${motion.angle}deg`)
+  surface.style.setProperty('--liquid-skew', `${clamp(wobble * 3.4 + (waveY - waveX) * .035, -6, 6)}deg`)
+  surface.style.setProperty('--lag-x', `${lagX}px`)
+  surface.style.setProperty('--lag-y', `${lagY}px`)
+  surface.style.setProperty('--wave-x', `${waveX}px`)
+  surface.style.setProperty('--wave-y', `${waveY}px`)
+  surface.style.setProperty('--highlight-x', `${clamp(-waveX * .22, -5, 5)}px`)
+  surface.style.setProperty('--highlight-y', `${clamp(-waveY * .22, -5, 5)}px`)
+  surface.style.setProperty('--shape-a', `${shapeA}px`)
+  surface.style.setProperty('--shape-b', `${shapeB}px`)
+  surface.style.setProperty('--shape-c', `${shapeC}px`)
+  surface.style.setProperty('--shape-d', `${shapeD}px`)
+}
+
 export function ConciergeOrb({ state, compact = false, progress = 0, onClick }: { state: OrbState; compact?: boolean; progress?: number; onClick: () => void }) {
   const stageRef = useRef<HTMLDivElement>(null)
   const physicsRef = useRef<HTMLSpanElement>(null)
   const dragRef = useRef<DragSession | null>(null)
-  const bounceFrameRef = useRef<number | null>(null)
+  const physicsFrameRef = useRef<number | null>(null)
+  const motionRef = useRef<LiquidMotion>({
+    stretch: 0,
+    stretchVelocity: 0,
+    stretchTarget: 0,
+    angle: 0,
+    angleTarget: 0,
+    lagX: 0,
+    lagY: 0,
+    lagVelocityX: 0,
+    lagVelocityY: 0,
+    lagTargetX: 0,
+    lagTargetY: 0,
+    waveX: 0,
+    waveY: 0,
+    waveVelocityX: 0,
+    waveVelocityY: 0,
+    waveTargetX: 0,
+    waveTargetY: 0,
+    wobble: 0,
+    wobbleVelocity: 0,
+  })
   const [placement, setPlacement] = useState<OrbPlacement>(loadPlacement)
   const [dragging, setDragging] = useState(false)
   const [impactId, setImpactId] = useState(0)
 
-  const applyPhysics = (stretch: number, angle: number, waveX: number, waveY: number) => {
-    const surface = physicsRef.current
-    if (!surface) return
-    const safeStretch = Math.max(-.22, Math.min(.32, stretch))
-    surface.style.setProperty('--liquid-scale-x', `${1 + safeStretch}`)
-    surface.style.setProperty('--liquid-scale-y', `${1 - safeStretch * .58}`)
-    surface.style.setProperty('--liquid-angle', `${angle}deg`)
-    surface.style.setProperty('--wave-x', `${Math.max(-18, Math.min(18, waveX))}px`)
-    surface.style.setProperty('--wave-y', `${Math.max(-18, Math.min(18, waveY))}px`)
-  }
+  useEffect(() => {
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    let previous = performance.now()
+    const animate = (now: number) => {
+      const seconds = clamp((now - previous) / 1000, 1 / 240, 1 / 30)
+      previous = now
+      const motion = motionRef.current
+      const active = dragRef.current !== null
 
-  const settlePhysics = (stretch: number, angle: number, waveX: number, waveY: number) => {
-    if (bounceFrameRef.current !== null) window.cancelAnimationFrame(bounceFrameRef.current)
-    const started = performance.now()
-    const tick = (now: number) => {
-      const seconds = (now - started) / 1000
-      const decay = Math.exp(-4.2 * seconds)
-      const oscillation = Math.cos(seconds * 18)
-      applyPhysics(stretch * decay * oscillation, angle * decay * oscillation, waveX * decay * oscillation, waveY * decay * oscillation)
-      if (seconds < 1.25) bounceFrameRef.current = window.requestAnimationFrame(tick)
-      else {
-        bounceFrameRef.current = null
-        applyPhysics(0, 0, 0, 0)
+      if (reducedMotion.matches) {
+        motion.stretch = active ? motion.stretchTarget : 0
+        motion.lagX = active ? motion.lagTargetX : 0
+        motion.lagY = active ? motion.lagTargetY : 0
+        motion.waveX = active ? motion.waveTargetX : 0
+        motion.waveY = active ? motion.waveTargetY : 0
+        motion.wobble = 0
+      } else {
+        const stretchSpring = active ? 170 : 105
+        const stretchDamping = active ? 17 : 9.2
+        ;[motion.stretch, motion.stretchVelocity] = springStep(motion.stretch, motion.stretchVelocity, active ? motion.stretchTarget : 0, stretchSpring, stretchDamping, seconds)
+        ;[motion.lagX, motion.lagVelocityX] = springStep(motion.lagX, motion.lagVelocityX, active ? motion.lagTargetX : 0, active ? 190 : 122, active ? 20 : 11.5, seconds)
+        ;[motion.lagY, motion.lagVelocityY] = springStep(motion.lagY, motion.lagVelocityY, active ? motion.lagTargetY : 0, active ? 190 : 122, active ? 20 : 11.5, seconds)
+        ;[motion.waveX, motion.waveVelocityX] = springStep(motion.waveX, motion.waveVelocityX, active ? motion.waveTargetX : 0, active ? 105 : 66, active ? 11 : 6.8, seconds)
+        ;[motion.waveY, motion.waveVelocityY] = springStep(motion.waveY, motion.waveVelocityY, active ? motion.waveTargetY : 0, active ? 105 : 66, active ? 11 : 6.8, seconds)
+        ;[motion.wobble, motion.wobbleVelocity] = springStep(motion.wobble, motion.wobbleVelocity, 0, 78, active ? 8.5 : 6.6, seconds)
       }
+
+      const angleTarget = active || Math.abs(motion.stretch) > .006 ? motion.angleTarget : 0
+      motion.angle += shortestAngle(motion.angle, angleTarget) * (1 - Math.exp(-(active ? 18 : 4.5) * seconds))
+      writeLiquidFrame(physicsRef.current, motion, now, !active && !reducedMotion.matches)
+
+      if (active) {
+        const targetDecay = Math.exp(-5.8 * seconds)
+        motion.stretchTarget *= targetDecay
+        motion.lagTargetX *= targetDecay
+        motion.lagTargetY *= targetDecay
+        motion.waveTargetX *= targetDecay
+        motion.waveTargetY *= targetDecay
+      }
+      physicsFrameRef.current = window.requestAnimationFrame(animate)
     }
-    bounceFrameRef.current = window.requestAnimationFrame(tick)
-  }
+    physicsFrameRef.current = window.requestAnimationFrame(animate)
+    return () => {
+      if (physicsFrameRef.current !== null) window.cancelAnimationFrame(physicsFrameRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     const positionOrb = () => {
@@ -100,14 +202,9 @@ export function ConciergeOrb({ state, compact = false, progress = 0, onClick }: 
     }
   }, [compact])
 
-  useEffect(() => () => {
-    if (bounceFrameRef.current !== null) window.cancelAnimationFrame(bounceFrameRef.current)
-  }, [])
-
   const pointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return
     event.preventDefault()
-    if (bounceFrameRef.current !== null) window.cancelAnimationFrame(bounceFrameRef.current)
     event.currentTarget.setPointerCapture(event.pointerId)
     dragRef.current = {
       pointerId: event.pointerId,
@@ -118,14 +215,17 @@ export function ConciergeOrb({ state, compact = false, progress = 0, onClick }: 
       lastX: event.clientX,
       lastY: event.clientY,
       lastTime: performance.now(),
-      stretch: 0,
-      angle: 0,
-      waveX: 0,
-      waveY: 0,
+      velocityX: 0,
+      velocityY: 0,
       moved: false,
     }
+    const motion = motionRef.current
+    motion.stretchTarget = -.055
+    motion.stretchVelocity -= .7
+    motion.lagTargetY = 3
+    motion.waveTargetY = 8
+    motion.wobbleVelocity += .65
     setImpactId((current) => current + 1)
-    applyPhysics(-.035, 0, 0, 8)
     setDragging(true)
   }
 
@@ -139,18 +239,46 @@ export function ConciergeOrb({ state, compact = false, progress = 0, onClick }: 
     const frameX = event.clientX - drag.lastX
     const frameY = event.clientY - drag.lastY
     const elapsed = Math.max(8, now - drag.lastTime)
-    const speed = Math.hypot(frameX, frameY) / elapsed
-    drag.stretch = Math.min(.3, speed * .095)
-    drag.angle = Math.atan2(frameY, frameX) * 180 / Math.PI
-    drag.waveX = frameX * -.62
-    drag.waveY = frameY * -.62
+    const instantX = frameX / elapsed
+    const instantY = frameY / elapsed
+    drag.velocityX = drag.velocityX * .58 + instantX * .42
+    drag.velocityY = drag.velocityY * .58 + instantY * .42
     drag.lastX = event.clientX
     drag.lastY = event.clientY
     drag.lastTime = now
-    applyPhysics(drag.stretch, drag.angle, drag.waveX, drag.waveY)
+
+    const speed = Math.hypot(drag.velocityX, drag.velocityY)
+    const motion = motionRef.current
+    motion.stretchTarget = clamp(speed * .15, 0, .27)
+    if (speed > .025) motion.angleTarget = Math.atan2(drag.velocityY, drag.velocityX) * 180 / Math.PI
+    motion.lagTargetX = clamp(-drag.velocityX * 13, -16, 16)
+    motion.lagTargetY = clamp(-drag.velocityY * 13, -16, 16)
+    motion.waveTargetX = clamp(-drag.velocityX * 18, -20, 20)
+    motion.waveTargetY = clamp(-drag.velocityY * 18, -20, 20)
+    motion.wobbleVelocity += clamp((instantX - instantY) * .18, -.32, .32)
+
     if (Math.hypot(deltaX, deltaY) > 5) drag.moved = true
     const next = clampPlacement(drag.originX + deltaX, drag.originY + deltaY, rect.width, rect.height)
     setPlacement((current) => ({ ...current, ...next, ready: true }))
+  }
+
+  const releaseLiquid = (drag: DragSession | null) => {
+    const motion = motionRef.current
+    const velocityX = drag?.velocityX ?? 0
+    const velocityY = drag?.velocityY ?? 0
+    const releaseSpeed = Math.hypot(velocityX, velocityY)
+    motion.stretchTarget = 0
+    motion.lagTargetX = 0
+    motion.lagTargetY = 0
+    motion.waveTargetX = 0
+    motion.waveTargetY = 0
+    motion.stretchVelocity += clamp(releaseSpeed * 1.1, 0, 2.2)
+    motion.lagVelocityX += clamp(-velocityX * 82, -105, 105)
+    motion.lagVelocityY += clamp(-velocityY * 82, -105, 105)
+    motion.waveVelocityX += clamp(-velocityX * 145, -175, 175)
+    motion.waveVelocityY += clamp(-velocityY * 145, -175, 175)
+    motion.wobbleVelocity += clamp((velocityX + velocityY) * .72, -1.45, 1.45)
+    setImpactId((current) => current + 1)
   }
 
   const pointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -159,7 +287,7 @@ export function ConciergeOrb({ state, compact = false, progress = 0, onClick }: 
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     dragRef.current = null
     setDragging(false)
-    settlePhysics(drag.stretch, drag.angle, drag.waveX, drag.waveY)
+    releaseLiquid(drag)
     if (drag.moved) {
       setPlacement((current) => {
         localStorage.setItem(ORB_POSITION_KEY, JSON.stringify({ x: current.x, y: current.y }))
@@ -175,7 +303,7 @@ export function ConciergeOrb({ state, compact = false, progress = 0, onClick }: 
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     dragRef.current = null
     setDragging(false)
-    settlePhysics(drag?.stretch ?? 0, drag?.angle ?? 0, drag?.waveX ?? 0, drag?.waveY ?? 0)
+    releaseLiquid(drag)
   }
 
   const style = { '--progress': `${Math.max(4, progress)}%` } as CSSProperties
