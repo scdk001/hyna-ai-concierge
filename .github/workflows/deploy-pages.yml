@@ -1,4 +1,4 @@
-name: Deploy FINSTREET Concierge to GitHub Pages
+name: Deploy Hyna AI Concierge to GitHub Pages
 
 on:
   push:

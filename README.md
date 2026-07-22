@@ -41,7 +41,7 @@ Terminal 2:
 pnpm dev
 ```
 
-Open `http://127.0.0.1:4180/finstreet-demo/`. The API runs at `http://127.0.0.1:8787` and Vite proxies `/api` during development.
+Open `http://127.0.0.1:4180/hyna-ai-concierge/`. The API runs at `http://127.0.0.1:8787` and Vite proxies `/api` during development.
 
 The safe default is:
 
