@@ -1,7 +1,7 @@
 import { fieldDefinitions } from '../data/fieldDefinitions'
 import type { ConciergeApplication } from '../types'
 
-const STORAGE_KEY = 'finstreet-ai-concierge-demo-v1'
+const STORAGE_KEY = 'hyna-ai-concierge-demo-v1'
 
 export function newApplication(): ConciergeApplication {
   return {
@@ -11,7 +11,7 @@ export function newApplication(): ConciergeApplication {
     confirmedByApplicant: false,
     messages: [{
       id: 'welcome', role: 'assistant', timestamp: new Date().toISOString(),
-      body: "Hi, I’m your FINSTREET AI Loan Concierge. I’ll help organise your loan requirements before your broker reviews and submits the application. What would you like to finance?",
+      body: "Hi, I’m your Hyna AI Loan Concierge. I’ll help organise your loan requirements before your broker reviews and submits the application. What would you like to finance?",
     }],
   }
 }
@@ -33,7 +33,7 @@ export async function createDemoApplication(application: ConciergeApplication) {
   await new Promise((resolve) => window.setTimeout(resolve, 1100))
   const completed: ConciergeApplication = {
     ...application,
-    applicationId: 'FSA-2026-00127',
+    applicationId: 'HYA-DEMO-00127',
     status: 'AI Intake Complete — Broker Review Required',
     confirmedByApplicant: true,
     createdAt: new Date().toISOString(),

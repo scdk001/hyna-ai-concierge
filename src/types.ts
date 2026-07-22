@@ -41,3 +41,10 @@ export type ConciergeApplication = {
   confirmedByApplicant: boolean
   createdAt?: string
 }
+
+export type RuntimeState = {
+  availability: 'checking' | 'online' | 'offline' | 'error'
+  mode: 'demo' | 'openai' | 'browser-demo' | 'unknown'
+  label: string
+  model?: string
+}

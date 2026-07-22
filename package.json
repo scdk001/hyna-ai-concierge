@@ -1,19 +1,29 @@
 {
-  "name": "finstreet-ai-loan-concierge",
+  "name": "hyna-ai-loan-concierge",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev:api": "tsx watch server/index.ts",
+    "api": "tsx server/index.ts",
+    "build": "tsc -b && tsc -p tsconfig.server.json --noEmit && vite build",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "typecheck": "tsc -b && tsc -p tsconfig.server.json --noEmit",
+    "test:api": "tsx --test server/**/*.test.ts",
+    "check": "pnpm lint && pnpm typecheck && pnpm test:api && pnpm build"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/multipart": "^10.1.0",
     "@vitejs/plugin-react": "latest",
+    "fastify": "^5.10.0",
     "lucide-react": "latest",
+    "openai": "^6.48.0",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "latest",
@@ -24,6 +34,7 @@
     "eslint-plugin-react-hooks": "latest",
     "eslint-plugin-react-refresh": "latest",
     "globals": "latest",
+    "tsx": "^4.23.1",
     "typescript": "~5.9.3",
     "typescript-eslint": "latest",
     "vite": "latest"
